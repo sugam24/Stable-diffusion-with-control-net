@@ -13,6 +13,8 @@ and constraints are computed BEFORE image generation.
 Usage:
     1. Set DEFAULT_IMAGE_PATH and DEFAULT_MASK_PATH below and run: python generate_satellite_image.py
     2. Or pass paths as arguments: python generate_satellite_image.py --image <path> --mask <path>
+    3. For planned-city layout: put an aerial in reference_image/ (or set DEFAULT_REFERENCE_IMAGE_PATH).
+       The pipeline uses it for ControlNet structure; use --no_reference to use only the unplanned image.
 """
 
 import os
@@ -42,6 +44,8 @@ from compute_coverage import compute_coverage
 # =============================================================================
 DEFAULT_IMAGE_PATH = "../dataset/images/output_337.png"
 DEFAULT_MASK_PATH = "../dataset/masks/output_337.png"
+# Optional: planned-city image for ControlNet structure (relative to project root)
+DEFAULT_REFERENCE_IMAGE_PATH = "reference_image/reference_image_elche_alicante_spain.jpg"
 # =============================================================================
 
 
@@ -1300,6 +1304,9 @@ DEFAULT_PROMPT = (
     "high-resolution satellite aerial image, orthographic view, "
     "realistic rooftops, agricultural parcels, forest canopy texture, "
     "clear road networks, geographic consistency, "
+    "futuristic planned city, organized layout, wide tree-lined boulevards, "
+    "modern glass and steel buildings, green roofs, solar panels on buildings, "
+    "hyper-realistic, bright daylight, utopian atmosphere, "
     "clear sky, no clouds, photorealistic, sharp focus"
 )
 
@@ -1412,11 +1419,37 @@ def process_single_pair(
         log(f"   Input saved: {input_save_path}")
         log(f"   Mask saved: {mask_save_path}")
 
-    canny_image = extract_canny_edges(
-        original_image,
-        low_threshold=getattr(args, "canny_low", 50),
-        high_threshold=getattr(args, "canny_high", 120),
-    )
+    # Optional: use a separate reference image for ControlNet structure (e.g. planned city layout)
+    ref_path = getattr(args, "reference_image", None)
+    if ref_path and os.path.exists(ref_path):
+        if verbose:
+            log("   Using reference image for ControlNet structure (Canny"
+                + (", depth" if getattr(args, "use_depth_control", False) else "") + ")")
+        reference_image = Image.open(ref_path).convert("RGB").resize(
+            (args.size, args.size), Image.Resampling.LANCZOS
+        )
+        canny_image = extract_canny_edges(
+            reference_image,
+            low_threshold=getattr(args, "canny_low", 50),
+            high_threshold=getattr(args, "canny_high", 120),
+        )
+        ctrl_for_depth = reference_image
+        # Save reference and its Canny to output for reproducibility
+        ref_save = os.path.join(output_dir, f"{stem}_reference.png")
+        canny_save = os.path.join(output_dir, f"{stem}_reference_canny.png")
+        reference_image.save(ref_save)
+        canny_image.save(canny_save)
+        if verbose:
+            log(f"   Reference saved: {ref_save}")
+            log(f"   Reference Canny saved: {canny_save}")
+    else:
+        canny_image = extract_canny_edges(
+            original_image,
+            low_threshold=getattr(args, "canny_low", 50),
+            high_threshold=getattr(args, "canny_high", 120),
+        )
+        ctrl_for_depth = original_image
+
     control_images = [canny_image]
     control_scales = [getattr(args, "controlnet_scale", 0.8)]
 
@@ -1429,7 +1462,7 @@ def process_single_pair(
         control_scales.append(getattr(args, "seg_scale", 1.0))
 
     if getattr(args, "use_depth_control", False):
-        depth_image = extract_depth_image(original_image, resolution=args.size)
+        depth_image = extract_depth_image(ctrl_for_depth, resolution=args.size)
         control_images.append(depth_image)
         control_scales.append(getattr(args, "depth_scale", 0.7))
 
@@ -1646,9 +1679,48 @@ def main():
         default=None,
         help="Dataset directory with images/ and masks/ subdirs (default: project_root/dataset)"
     )
-    
+    parser.add_argument(
+        "--reference_image",
+        type=str,
+        default=None,
+        help="Planned-city (or layout) image for ControlNet structure. Canny and depth from this image; inpainting uses --image/--mask. Default: project reference_image/ folder if present."
+    )
+    parser.add_argument(
+        "--no_reference",
+        action="store_true",
+        help="Do not use any reference image; use unplanned image for ControlNet structure (original behavior)."
+    )
+
     args = parser.parse_args()
     script_dir = os.path.dirname(os.path.abspath(__file__))
+    # Resolve reference image: explicit path, or default from reference_image/ folder
+    if getattr(args, "no_reference", False):
+        args.reference_image = None
+    elif getattr(args, "reference_image", None):
+        ref = args.reference_image
+        if not os.path.isabs(ref):
+            args.reference_image = os.path.join(script_dir, ref)
+    else:
+        # Default: use project reference_image/ folder (single file or first image found)
+        proot = get_project_root()
+        default_ref = os.path.join(proot, DEFAULT_REFERENCE_IMAGE_PATH)
+        if os.path.isfile(default_ref):
+            args.reference_image = default_ref
+        else:
+            ref_dir = os.path.join(proot, "reference_image")
+            if os.path.isdir(ref_dir):
+                for ext in (".png", ".jpg", ".jpeg", ".bmp", ".tiff"):
+                    found = next(
+                        (
+                            os.path.join(ref_dir, f)
+                            for f in sorted(os.listdir(ref_dir))
+                            if f.lower().endswith(ext)
+                        ),
+                        None,
+                    )
+                    if found:
+                        args.reference_image = found
+                        break
     output_dir = os.path.dirname(args.output) or str(project_root / "output")
     os.makedirs(output_dir, exist_ok=True)
 
