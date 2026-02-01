@@ -5,15 +5,18 @@ This project uses **ControlNet** + **Stable Diffusion** to generate realistic sa
 ## 📁 Project Structure
 
 ```
-controlnet+stable_diffusion/
+Stable-diffusion-with-control-net/
 ├── src/                             # Main Python code
-│   ├── generate_satellite_image.py  # Single image generation
-│   └── batch_generate.py            # Batch processing script
-├── dataset/                        # Put your satellite images here
-├── output/                         # Generated images will be saved here
-├── venv/                           # Virtual environment (will be created)
-├── requirements.txt                # Python dependencies
-└── README.md                       # This file
+│   ├── generate_satellite_image.py  # Single + batch image generation
+│   └── compute_coverage.py           # Coverage analysis
+├── dataset/                         # Satellite images and masks
+│   ├── images/                      # Input images
+│   └── masks/                       # Segmentation masks
+├── reference_image/                 # Planned-city reference (optional)
+├── output/                          # Generated images
+├── requirements.txt
+├── USAGE_EXAMPLES.md                # Run examples (see this!)
+└── README.md
 ```
 
 ## 🚀 Setup Instructions
@@ -46,37 +49,46 @@ python3 -c "from diffusers import StableDiffusionControlNetPipeline; print('Diff
 
 ## 🎯 Usage
 
-### Option 1: Generate from Satellite Image (Recommended)
+The pipeline requires an **image** and **segmentation mask**. See **[USAGE_EXAMPLES.md](USAGE_EXAMPLES.md)** for full run examples.
+
+### Basic run (default settings)
 
 ```bash
-python3 src/generate_satellite_image.py \
-  --input dataset/your_satellite_image.png \
-  --prompt "modern smart city with solar panels, green spaces, autonomous vehicles, 5G towers" \
-  --output output/generated_smart_city.png \
-  --steps 30 \
-  --guidance_scale 7.5
+python src/generate_satellite_image.py
 ```
 
-### Option 2: Generate from Scratch
+Uses defaults: `dataset/images/output_337.png`, `dataset/masks/output_337.png`, and auto-detects reference from `reference_image/`.
+
+### With explicit image and mask
 
 ```bash
-python3 src/generate_satellite_image.py \
-  --prompt "futuristic smart city layout with AI monitoring systems, sustainable buildings, drone delivery zones" \
-  --output output/generated_from_scratch.png \
-  --steps 30
+python src/generate_satellite_image.py \
+  --image dataset/images/your_image.png \
+  --mask dataset/masks/your_image.png \
+  --output output/generated_smart_city.png
 ```
 
-### Option 3: Batch Processing
-
-Place multiple satellite images in the `dataset/` folder, then run:
+### Low VRAM (4GB GPUs)
 
 ```bash
-python3 src/batch_generate.py \
-  --dataset_dir dataset \
-  --prompt "smart city with IoT sensors, sustainable architecture, green infrastructure" \
-  --output_dir output \
-  --steps 25
+python src/generate_satellite_image.py --low_vram
 ```
+
+### Batch processing
+
+```bash
+python src/generate_satellite_image.py --batch
+```
+
+### Quality options
+
+```bash
+# 2x upscale, Euler scheduler, custom model
+python src/generate_satellite_image.py --upscale 2 --scheduler euler_a
+python src/generate_satellite_image.py --model path/to/checkpoint.safetensors --lora path/to/lora.safetensors
+```
+
+**See [USAGE_EXAMPLES.md](USAGE_EXAMPLES.md) for all documented run examples.**
 
 ## 📋 Prompt Examples for Smart Cities
 
@@ -121,19 +133,28 @@ top-down view of an eco-friendly smart city with:
 
 ### src/generate_satellite_image.py
 
-- `--input`: Path to input satellite image (optional)
-- `--prompt`: Text prompt for generation (required)
-- `--negative_prompt`: What to avoid in generation (default: "blurry, low quality, distorted")
-- `--output`: Path to save generated image (default: "output/generated_image.png")
-- `--steps`: Number of inference steps, 20-50 (default: 30)
-- `--guidance_scale`: How much to follow the prompt, 7-15 (default: 7.5)
-- `--seed`: Random seed for reproducibility (optional)
+| Argument | Description |
+|----------|-------------|
+| `--image` | Path to input satellite image |
+| `--mask` | Path to segmentation mask |
+| `--output` | Path to save generated image |
+| `--reference_image` | Planned-city image for ControlNet structure (optional) |
+| `--no_reference` | Use only unplanned image (no reference) |
+| `--prompt` | Text prompt for generation |
+| `--negative_prompt` | What to avoid |
+| `--steps` | Inference steps (30-40 recommended, default 35) |
+| `--guidance_scale` | CFG scale (5-8 recommended, default 7.0) |
+| `--size` | Image size (768 default; 512 with --low_vram) |
+| `--low_vram` | Use CPU offload for 4GB GPUs |
+| `--upscale` | Post-upscale factor (1 or 2) |
+| `--model` | Custom checkpoint (HuggingFace ID or .ckpt/.safetensors) |
+| `--lora` | Path to LoRA weights |
+| `--scheduler` | `dpm++2m` or `euler_a` |
+| `--control_guidance_end` | Stop ControlNet at this step % (default 0.7) |
+| `--batch` | Process all image-mask pairs in dataset |
+| `--seed` | Random seed for reproducibility |
 
-### src/batch_generate.py
-
-Same arguments as above, with:
-
-- `--dataset_dir`: Directory containing satellite images (default: "dataset")
+Run `python src/generate_satellite_image.py --help` for full list.
 
 ## 📊 Expected Results
 

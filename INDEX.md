@@ -5,8 +5,9 @@
 **New to this project?** Start with one of these:
 
 1. **[GETTING_STARTED.md](GETTING_STARTED.md)** - Quick start (5 min read)
-2. **[README.md](README.md)** - User guide (15 min read)
-3. **[PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md)** - Complete overview (20 min read)
+2. **[USAGE_EXAMPLES.md](USAGE_EXAMPLES.md)** - Run examples (documented commands)
+3. **[README.md](README.md)** - User guide (15 min read)
+4. **[PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md)** - Complete overview (20 min read)
 
 ---
 
@@ -17,6 +18,7 @@
 | File                   | Time  | Purpose                             |
 | ---------------------- | ----- | ----------------------------------- |
 | **GETTING_STARTED.md** | 5 min | First-time setup and quick examples |
+| **USAGE_EXAMPLES.md**  | 5 min | Documented run examples             |
 | **quickstart.sh**      | 1 min | Print quick reference to terminal   |
 | **demo.sh**            | 1 min | Show usage examples                 |
 
@@ -41,20 +43,25 @@
 
 ```bash
 # 1. Navigate to project
-cd ~/Desktop/controlnet+stable_diffusion
+cd /path/to/Stable-diffusion-with-control-net
 source venv/bin/activate
 
-# 2. Add your satellite image to dataset/ folder
-# (e.g., cp your_image.png dataset/)
+# 2. Add image and mask to dataset/images/ and dataset/masks/
+# (e.g., cp your_image.png dataset/images/ && cp your_mask.png dataset/masks/)
 
-# 3. Generate smart city image
-python3 src/generate_satellite_image.py \
-  --input dataset/your_image.png \
-  --prompt "modern smart city with solar panels and green infrastructure" \
+# 3. Generate smart city image (default run)
+python src/generate_satellite_image.py
+
+# Or with explicit paths:
+python src/generate_satellite_image.py \
+  --image dataset/images/your_image.png \
+  --mask dataset/masks/your_image.png \
   --output output/generated_smart_city.png
 
 # 4. Check output/ folder for results!
 ```
+
+See **[USAGE_EXAMPLES.md](USAGE_EXAMPLES.md)** for full documented run examples.
 
 ---
 
@@ -72,29 +79,16 @@ python3 src/generate_satellite_image.py \
 **Usage:**
 
 ```bash
-python3 src/generate_satellite_image.py --help
-python3 src/generate_satellite_image.py \
-  --input dataset/image.png \
-  --prompt "smart city" \
-  --output output/result.png
+python src/generate_satellite_image.py --help
+python src/generate_satellite_image.py --image dataset/images/img.png --mask dataset/masks/img.png
 ```
 
-### Batch Processing Script
+### Batch Processing (same script)
 
-**`src/batch_generate.py`** (140 lines)
-
-- Process multiple images at once
-- Ideal for large datasets
-- Same quality as single generation
-- Progress tracking
-
-**Usage:**
+Use `--batch` to process all image-mask pairs in `dataset/`:
 
 ```bash
-python3 src/batch_generate.py --help
-python3 src/batch_generate.py \
-  --dataset_dir dataset \
-  --prompt "sustainable smart city"
+python src/generate_satellite_image.py --batch
 ```
 
 ---
@@ -112,12 +106,13 @@ python3 src/batch_generate.py \
 │   └── bin/activate               ← Activate with: source venv/bin/activate
 │
 ├── 🎨 GENERATION SCRIPTS
-│   ├── src/
-│   │   ├── generate_satellite_image.py ← Single image generation
-│   │   └── batch_generate.py           ← Multiple image processing
+│   └── src/
+│       ├── generate_satellite_image.py ← Single + batch generation
+│       └── compute_coverage.py         ← Coverage analysis
 │
 ├── 📖 DOCUMENTATION
 │   ├── GETTING_STARTED.md         ← START HERE! (Quick start)
+│   ├── USAGE_EXAMPLES.md          ← Run examples (documented commands)
 │   ├── README.md                  ← Full user guide
 │   ├── SETUP.md                   ← Setup details
 │   ├── PROJECT_OVERVIEW.md        ← Complete reference
@@ -160,64 +155,56 @@ pip install -r requirements.txt
 
 ## 🎯 Common Tasks
 
-### Task 1: Generate From Satellite Image
+### Task 1: Default run
 
 ```bash
 source venv/bin/activate
-python3 src/generate_satellite_image.py \
-  --input dataset/city.jpg \
-  --prompt "modern smart city" \
-  --output output/result.png
+python src/generate_satellite_image.py
 ```
 
-**Time:** ~45 seconds (GPU)
+**Time:** ~60 seconds (GPU, 768x768)
 
-### Task 2: Batch Process Images
+### Task 2: Batch process
 
 ```bash
-source venv/bin/activate
-python3 src/batch_generate.py \
-  --dataset_dir dataset \
-  --prompt "sustainable smart city"
+python src/generate_satellite_image.py --batch
 ```
 
-**Time:** 45s × number of images
+**Time:** ~60s × number of pairs
 
-### Task 3: High Quality Generation
+### Task 3: Low VRAM (4GB GPUs)
 
 ```bash
-python3 src/generate_satellite_image.py \
-  --input dataset/city.jpg \
-  --prompt "professional satellite image of smart city" \
-  --steps 50 \
-  --guidance_scale 10
+python src/generate_satellite_image.py --low_vram
 ```
 
-**Time:** ~75 seconds (GPU)
-
-### Task 4: Generate From Scratch
+### Task 4: With quality options
 
 ```bash
-python3 src/generate_satellite_image.py \
-  --prompt "aerial view of smart city" \
-  --output output/generated.png
+python src/generate_satellite_image.py --upscale 2 --scheduler euler_a
 ```
 
-**Time:** ~45 seconds (GPU)
+See **[USAGE_EXAMPLES.md](USAGE_EXAMPLES.md)** for all run examples.
 
 ---
 
 ## ⚙️ Parameter Quick Reference
 
 ```
---input FILE          Input satellite image path
---prompt TEXT         Generation prompt (required)
---output FILE         Output image path (default: output/generated_image.png)
---steps N             Inference steps 20-50 (default: 30)
---guidance_scale N    Prompt strength 5-15 (default: 7.5)
---negative_prompt     What to avoid (default: "blurry, low quality")
---seed N              Random seed for reproducibility
+--image FILE          Input satellite image path
+--mask FILE           Segmentation mask path
+--output FILE         Output image path
+--reference_image     Planned-city reference (optional)
+--size N              Image size (768 default; 512 with --low_vram)
+--low_vram            CPU offload for 4GB GPUs
+--upscale 2           Post-upscale 2x Lanczos
+--model               Custom checkpoint
+--lora                LoRA path
+--scheduler           dpm++2m or euler_a
+--batch               Process all image-mask pairs
 ```
+
+Run `python src/generate_satellite_image.py --help` for full list.
 
 ---
 
@@ -350,6 +337,9 @@ All Packages: Installed ✓
 
 # Run health check
 ./validate.sh
+
+# View run examples
+less USAGE_EXAMPLES.md
 
 # View full documentation
 less GETTING_STARTED.md

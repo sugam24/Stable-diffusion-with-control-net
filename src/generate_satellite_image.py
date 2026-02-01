@@ -15,6 +15,12 @@ Usage:
     2. Or pass paths as arguments: python generate_satellite_image.py --image <path> --mask <path>
     3. For planned-city layout: put an aerial in reference_image/ (or set DEFAULT_REFERENCE_IMAGE_PATH).
        The pipeline uses it for ControlNet structure; use --no_reference to use only the unplanned image.
+
+Quality improvements (address brown smudges, over-guidance):
+    - Resolution: --size 768 (default), --upscale 2 for 2x Lanczos
+    - ControlNet: lower scales (0.6-0.8), --control_guidance_end 0.7 so model cleans up in final 30%%
+    - Model: --model <aerial checkpoint>, --lora <satellite LoRA> from Civitai
+    - Sampling: CFG 5-8, steps 30-40, --scheduler euler_a or dpm++2m
 """
 
 import os
@@ -33,6 +39,7 @@ from diffusers import (
     ControlNetModel,
     MultiControlNetModel,
     DPMSolverMultistepScheduler,
+    EulerAncestralDiscreteScheduler,
 )
 
 # Import compute_coverage from the same directory
@@ -982,6 +989,10 @@ class SmartCitySatelliteGenerator:
         low_vram: bool = False,
         use_seg_control: bool = True,
         use_depth_control: bool = False,
+        model_id: str = "runwayml/stable-diffusion-inpainting",
+        lora_path: Optional[str] = None,
+        lora_scale: float = 0.8,
+        scheduler: str = "dpm++2m",
     ):
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.dtype = torch.float16 if self.device == "cuda" else torch.float32
@@ -1015,19 +1026,43 @@ class SmartCitySatelliteGenerator:
         
         self.controlnet = MultiControlNetModel(controlnets) if len(controlnets) > 1 else controlnets[0]
         
-        print("Loading Stable Diffusion Inpainting pipeline...")
-        self.pipeline = StableDiffusionControlNetInpaintPipeline.from_pretrained(
-            "runwayml/stable-diffusion-inpainting",
-            controlnet=self.controlnet,
-            torch_dtype=self.dtype,
-            safety_checker=None,
-        )
+        print(f"Loading Stable Diffusion Inpainting pipeline ({model_id})...")
+        if model_id.endswith(".ckpt") or model_id.endswith(".safetensors"):
+            self.pipeline = StableDiffusionControlNetInpaintPipeline.from_single_file(
+                model_id,
+                controlnet=self.controlnet,
+                torch_dtype=self.dtype,
+                safety_checker=None,
+            )
+        else:
+            self.pipeline = StableDiffusionControlNetInpaintPipeline.from_pretrained(
+                model_id,
+                controlnet=self.controlnet,
+                torch_dtype=self.dtype,
+                safety_checker=None,
+            )
         
-        self.pipeline.scheduler = DPMSolverMultistepScheduler.from_config(
-            self.pipeline.scheduler.config,
-            use_karras_sigmas=True,
-            algorithm_type="dpmsolver++",
-        )
+        # Scheduler: dpm++2m (Karras) or euler_a for cleaner results
+        if scheduler == "euler_a":
+            self.pipeline.scheduler = EulerAncestralDiscreteScheduler.from_config(
+                self.pipeline.scheduler.config,
+            )
+        else:
+            self.pipeline.scheduler = DPMSolverMultistepScheduler.from_config(
+                self.pipeline.scheduler.config,
+                use_karras_sigmas=True,
+                algorithm_type="dpmsolver++",
+            )
+        
+        self.lora_scale = None
+        if lora_path:
+            try:
+                print(f"Loading LoRA: {lora_path} (scale={lora_scale})...")
+                self.pipeline.load_lora_weights(lora_path)
+                self.lora_scale = lora_scale
+                print("LoRA loaded successfully")
+            except Exception as e:
+                print(f"Warning: Could not load LoRA ({e}). Proceeding without.")
         
         if use_ip_adapter:
             try:
@@ -1069,6 +1104,8 @@ class SmartCitySatelliteGenerator:
         num_inference_steps: int = 35,
         guidance_scale: float = 7.0,
         controlnet_conditioning_scale: Union[float, List[float], None] = None,
+        control_guidance_start: float = 0.0,
+        control_guidance_end: float = 0.7,
         ip_adapter_scale: float = 0.6,
         strength: float = 0.60,
         seed: Optional[int] = None,
@@ -1078,11 +1115,12 @@ class SmartCitySatelliteGenerator:
         controlnet_conditioning_scale: float or list matching number of ControlNets.
         """
         if controlnet_conditioning_scale is None:
-            scales = [0.8]  # Canny
+            # Lower scales (0.6-0.8) reduce over-guidance; model can "clean up" chaotic layout
+            scales = [0.7]  # Canny
             if self.use_seg_control:
-                scales.append(1.0)
+                scales.append(0.75)
             if self.use_depth_control:
-                scales.append(0.7)
+                scales.append(0.6)
             controlnet_conditioning_scale = scales[0] if len(scales) == 1 else scales
 
         # With CPU offload, generator device must be "cpu" for correct placement
@@ -1109,6 +1147,8 @@ class SmartCitySatelliteGenerator:
             num_inference_steps=num_inference_steps,
             guidance_scale=guidance_scale,
             controlnet_conditioning_scale=controlnet_conditioning_scale,
+            control_guidance_start=control_guidance_start,
+            control_guidance_end=control_guidance_end,
             strength=strength,
             generator=generator,
             height=original_image.height,
@@ -1116,6 +1156,8 @@ class SmartCitySatelliteGenerator:
         )
         if self.use_ip_adapter:
             pipeline_kwargs["ip_adapter_image"] = original_image
+        if getattr(self, "lora_scale", None) is not None:
+            pipeline_kwargs["cross_attention_kwargs"] = {"scale": self.lora_scale}
         
         with torch.no_grad():
             result = self.pipeline(**pipeline_kwargs)
@@ -1451,7 +1493,7 @@ def process_single_pair(
         ctrl_for_depth = original_image
 
     control_images = [canny_image]
-    control_scales = [getattr(args, "controlnet_scale", 0.8)]
+    control_scales = [getattr(args, "controlnet_scale", 0.7)]
 
     if getattr(args, "no_seg_control", False):
         if verbose:
@@ -1459,12 +1501,12 @@ def process_single_pair(
     else:
         seg_image = create_seg_control_image(label_mask)
         control_images.append(seg_image)
-        control_scales.append(getattr(args, "seg_scale", 1.0))
+        control_scales.append(getattr(args, "seg_scale", 0.75))
 
     if getattr(args, "use_depth_control", False):
         depth_image = extract_depth_image(ctrl_for_depth, resolution=args.size)
         control_images.append(depth_image)
-        control_scales.append(getattr(args, "depth_scale", 0.7))
+        control_scales.append(getattr(args, "depth_scale", 0.6))
 
     control_image = control_images[0] if len(control_images) == 1 else control_images
     controlnet_scale = control_scales[0] if len(control_scales) == 1 else control_scales
@@ -1476,6 +1518,10 @@ def process_single_pair(
         low_vram=args.low_vram,
         use_seg_control=not getattr(args, "no_seg_control", False),
         use_depth_control=getattr(args, "use_depth_control", False),
+        model_id=getattr(args, "model", "runwayml/stable-diffusion-inpainting"),
+        lora_path=getattr(args, "lora", None),
+        lora_scale=getattr(args, "lora_scale", 0.8),
+        scheduler=getattr(args, "scheduler", "dpm++2m"),
     )
     generated_image = generator.generate_smart_city_image(
         original_image=original_image,
@@ -1486,6 +1532,8 @@ def process_single_pair(
         num_inference_steps=args.steps,
         guidance_scale=args.guidance_scale,
         controlnet_conditioning_scale=controlnet_scale,
+        control_guidance_start=getattr(args, "control_guidance_start", 0.0),
+        control_guidance_end=getattr(args, "control_guidance_end", 0.7),
         ip_adapter_scale=args.ip_adapter_scale,
         strength=args.strength,
         seed=args.seed,
@@ -1508,6 +1556,14 @@ def process_single_pair(
     final_image = composite_with_original(
         generated_image, original_image, inpaint_mask, immutable_mask
     )
+
+    # Optional: upscale 2x for more pixel density (simple Lanczos; use external upscaler for hires fix)
+    upscale_factor = getattr(args, "upscale", 1)
+    if upscale_factor > 1:
+        new_size = (final_image.width * upscale_factor, final_image.height * upscale_factor)
+        final_image = final_image.resize(new_size, Image.Resampling.LANCZOS)
+        if verbose:
+            log(f"   Upscaled {upscale_factor}x to {new_size[0]}x{new_size[1]}")
 
     # Save output (ControlNet result)
     output_save_path = os.path.join(output_dir, f"{stem}_output.png")
@@ -1565,13 +1621,13 @@ def main():
         "--guidance_scale",
         type=float,
         default=7.0,
-        help="Guidance scale (6.5-8 for stability)"
+        help="CFG scale (5-8 for stability; >10 causes crunchy/over-saturated)"
     )
     parser.add_argument(
         "--controlnet_scale",
         type=float,
-        default=0.8,
-        help="Canny ControlNet conditioning scale"
+        default=0.7,
+        help="Canny ControlNet scale (0.6-0.8 reduces over-guidance from chaotic input)"
     )
     parser.add_argument(
         "--strength",
@@ -1588,8 +1644,8 @@ def main():
     parser.add_argument(
         "--size",
         type=int,
-        default=512,
-        help="Image size. 512 default (works on 4GB GPUs with --low_vram). 768 needs 8GB+ VRAM"
+        default=768,
+        help="Image size. 768 for better pixel density (8GB+ VRAM). Use 512 with --low_vram for 4GB GPUs"
     )
     parser.add_argument(
         "--analysis_only",
@@ -1631,8 +1687,8 @@ def main():
     parser.add_argument(
         "--seg_scale",
         type=float,
-        default=1.0,
-        help="Segmentation ControlNet weight (1.0 recommended for structural preservation)"
+        default=0.75,
+        help="Segmentation ControlNet weight (0.6-0.8 lets model clean up chaotic layout)"
     )
     parser.add_argument(
         "--use_depth_control",
@@ -1642,7 +1698,7 @@ def main():
     parser.add_argument(
         "--depth_scale",
         type=float,
-        default=0.7,
+        default=0.6,
         help="Depth ControlNet weight"
     )
     parser.add_argument(
@@ -1690,9 +1746,56 @@ def main():
         action="store_true",
         help="Do not use any reference image; use unplanned image for ControlNet structure (original behavior)."
     )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="runwayml/stable-diffusion-inpainting",
+        help="Base model (HuggingFace ID or path to .ckpt/.safetensors). Use aerial/satellite checkpoints from Civitai for better top-down."
+    )
+    parser.add_argument(
+        "--lora",
+        type=str,
+        default=None,
+        help="Path to LoRA weights (satellite/aerial LoRA from Civitai for crisper buildings)"
+    )
+    parser.add_argument(
+        "--lora_scale",
+        type=float,
+        default=0.8,
+        help="LoRA strength (0.5-1.0). Default 0.8"
+    )
+    parser.add_argument(
+        "--scheduler",
+        type=str,
+        default="dpm++2m",
+        choices=["dpm++2m", "euler_a"],
+        help="Scheduler: dpm++2m (Karras) or euler_a for cleaner results"
+    )
+    parser.add_argument(
+        "--control_guidance_start",
+        type=float,
+        default=0.0,
+        help="ControlNet start (0-1). When to begin applying control. Default 0"
+    )
+    parser.add_argument(
+        "--control_guidance_end",
+        type=float,
+        default=0.7,
+        help="ControlNet end (0-1). Stop control at 70%% so model can sharpen in final 30%%. Default 0.7"
+    )
+    parser.add_argument(
+        "--upscale",
+        type=int,
+        default=1,
+        choices=[1, 2],
+        help="Post-upscale factor (2 = 2x Lanczos). For full hires fix use external upscaler"
+    )
 
     args = parser.parse_args()
     script_dir = os.path.dirname(os.path.abspath(__file__))
+    # Low VRAM: cap size at 512 to avoid OOM
+    if getattr(args, "low_vram", False) and args.size > 512:
+        args.size = 512
     # Resolve reference image: explicit path, or default from reference_image/ folder
     if getattr(args, "no_reference", False):
         args.reference_image = None

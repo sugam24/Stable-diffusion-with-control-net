@@ -63,65 +63,58 @@ source venv/bin/activate
 ### Step 3: Generate Images
 
 ```bash
-python3 src/generate_satellite_image.py \
-  --input dataset/your_satellite_image.png \
-  --prompt "modern smart city with solar panels, green spaces, 5G infrastructure" \
+# Default run (uses dataset defaults + reference_image/ if present)
+python src/generate_satellite_image.py
+```
+
+Or with explicit image and mask:
+
+```bash
+python src/generate_satellite_image.py \
+  --image dataset/images/your_image.png \
+  --mask dataset/masks/your_image.png \
   --output output/generated_smart_city.png
 ```
 
 That's it! Check the `output/` folder for your generated images.
 
+**See [USAGE_EXAMPLES.md](USAGE_EXAMPLES.md) for full documented run examples.**
+
 ---
 
 ## 💡 Example Commands
 
-### Quick Generation (Draft Quality)
+### Default Run (Recommended)
 
 ```bash
-python3 src/generate_satellite_image.py \
-  --input dataset/city.png \
-  --prompt "smart city" \
-  --steps 20 \
-  --output output/quick_result.png
+python src/generate_satellite_image.py
 ```
 
-⏱️ **Time:** ~30 seconds
+⏱️ **Time:** ~60 seconds (768x768)
 
-### Standard Generation (Recommended)
+### Low VRAM (4GB GPUs)
 
 ```bash
-python3 src/generate_satellite_image.py \
-  --input dataset/city.png \
-  --prompt "modern smart city with solar panels and green infrastructure" \
-  --output output/smart_city.png
+python src/generate_satellite_image.py --low_vram
 ```
 
-⏱️ **Time:** ~45 seconds
-
-### High Quality Generation
+### With 2x Upscale
 
 ```bash
-python3 src/generate_satellite_image.py \
-  --input dataset/city.png \
-  --prompt "high quality satellite image of sustainable smart city" \
-  --steps 50 \
-  --guidance_scale 10 \
-  --output output/high_quality.png
+python src/generate_satellite_image.py --upscale 2
 ```
 
-⏱️ **Time:** ~75 seconds
-
-### Batch Process (Multiple Images)
+### Batch Process (Multiple Image-Mask Pairs)
 
 ```bash
-# Place images in dataset/ folder, then run:
-python3 src/batch_generate.py \
-  --dataset_dir dataset \
-  --prompt "sustainable smart city with IoT sensors" \
-  --output_dir output
+python src/generate_satellite_image.py --batch
 ```
 
-⏱️ **Time:** Depends on number of images
+⏱️ **Time:** ~60s × number of pairs
+
+### Full documented examples
+
+See **[USAGE_EXAMPLES.md](USAGE_EXAMPLES.md)** for all run examples (reference image, model, LoRA, scheduler, quality tuning, etc.).
 
 ---
 
@@ -159,23 +152,27 @@ professional high quality satellite imagery"
 ## ⚙️ Parameter Reference
 
 ```bash
-python3 src/generate_satellite_image.py \
-  --input dataset/image.png          # Input satellite image path
-  --prompt "your prompt"              # What you want to generate (REQUIRED)
-  --output output/result.png          # Where to save the result
-  --negative_prompt "blurry, low"     # What to avoid
-  --steps 30                          # 20-50 (higher = better quality)
-  --guidance_scale 7.5                # 5-15 (higher = stricter prompt)
-  --seed 42                           # For reproducible results (optional)
+python src/generate_satellite_image.py \
+  --image dataset/images/img.png     # Input satellite image
+  --mask dataset/masks/img.png       # Segmentation mask
+  --output output/result.png         # Where to save
+  --reference_image ref.png          # Planned-city reference (optional)
+  --low_vram                         # For 4GB GPUs
+  --upscale 2                        # Post-upscale 2x
+  --steps 35                         # Inference steps (30-40 recommended)
+  --guidance_scale 7.0               # CFG (5-8 recommended)
+  --seed 42                          # Reproducibility
 ```
 
 ### Quick Parameter Guide
 
-| Parameter          | Fast | Balanced | Quality |
-| ------------------ | ---- | -------- | ------- |
-| `--steps`          | 20   | 30       | 50      |
-| `--guidance_scale` | 5    | 7.5      | 10      |
-| Time               | ~30s | ~45s     | ~75s    |
+| Parameter          | Fast  | Balanced | Quality |
+| ------------------ | ----- | -------- | ------- |
+| `--size`           | 512   | 768      | 768     |
+| `--steps`          | 30    | 35       | 40      |
+| `--guidance_scale` | 6     | 7.0      | 8       |
+
+See **[USAGE_EXAMPLES.md](USAGE_EXAMPLES.md)** for full parameter list.
 
 ---
 
@@ -225,6 +222,7 @@ source venv/bin/activate
 
 | File                    | Purpose                       |
 | ----------------------- | ----------------------------- |
+| **USAGE_EXAMPLES.md**   | Documented run examples       |
 | **README.md**           | Comprehensive user guide      |
 | **SETUP.md**            | Detailed setup instructions   |
 | **PROJECT_OVERVIEW.md** | Project overview and examples |
@@ -301,7 +299,7 @@ source venv/bin/activate
 - [ ] Read this file (you're here!)
 - [ ] Add satellite images to `dataset/` folder
 - [ ] Activate virtual environment: `source venv/bin/activate`
-- [ ] Run a test: `python3 src/generate_satellite_image.py --input dataset/image.png --prompt "smart city"`
+- [ ] Run a test: `python src/generate_satellite_image.py`
 - [ ] Check `output/` folder for results
 - [ ] Adjust parameters and try again
 - [ ] Read detailed docs if needed
@@ -316,15 +314,21 @@ Your ControlNet + Stable Diffusion project is fully set up and ready to generate
 
 ```bash
 # 1. Go to project folder
-cd ~/Desktop/controlnet+stable_diffusion
+cd /path/to/Stable-diffusion-with-control-net
 
 # 2. Activate environment
 source venv/bin/activate
 
 # 3. Generate your first smart city image!
-python3 src/generate_satellite_image.py \
-  --input dataset/your_image.png \
-  --prompt "modern sustainable smart city" \
+python src/generate_satellite_image.py
+```
+
+Or with explicit paths:
+
+```bash
+python src/generate_satellite_image.py \
+  --image dataset/images/your_image.png \
+  --mask dataset/masks/your_image.png \
   --output output/my_first_smart_city.png
 ```
 
@@ -332,4 +336,4 @@ Happy generating! 🎨✨
 
 ---
 
-**Questions?** Check the documentation files or run `./demo.sh` for examples.
+**Questions?** See [USAGE_EXAMPLES.md](USAGE_EXAMPLES.md) for run examples, or run `./demo.sh`.
