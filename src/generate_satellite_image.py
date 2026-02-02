@@ -52,7 +52,7 @@ from compute_coverage import compute_coverage
 DEFAULT_IMAGE_PATH = "../dataset/images/output_337.png"
 DEFAULT_MASK_PATH = "../dataset/masks/output_337.png"
 # Optional: planned-city image for ControlNet structure (relative to project root)
-DEFAULT_REFERENCE_IMAGE_PATH = "reference_image/reference_image_elche_alicante_spain.jpg"
+DEFAULT_REFERENCE_IMAGE_PATH = "reference_image/barcelona_city.jpg"
 # =============================================================================
 
 
@@ -1310,19 +1310,18 @@ def validate_and_log_results(
 # PROMPT CONFIGURATION
 # =============================================================================
 
-# Planning-informed descriptors per editable class (concise for CLIP 77-token limit)
+# Per-class descriptors: comma-separated keywords (SD/LAION training style).
 CLASS_PROMPTS = {
     "Residential Area": (
-        "planned neighborhood, street grid, roads between blocks, spacing between houses, "
-        "small parks and green pockets, tree-lined streets, organized housing layout, green rooftops"
+        "grid blocks, white buildings, glass roofs, windows, solar panels, "
+        "green rooftops, tree-lined streets, modern architecture"
     ),
     "Unused Land": (
-        "parks, recreational areas, playgrounds, sports fields, walking paths, "
-        "green space, community garden, urban park"
+        "green parks, playgrounds, sports fields, walking paths, "
+        "community garden, lawn, trees"
     ),
     "Agricultural Area": (
-        "modern precision agriculture, organized crop fields, greenhouses, "
-        "structured farm layout, irrigation patterns"
+        "crop fields, greenhouses, farm layout, irrigation, agriculture"
     ),
 }
 
@@ -1342,29 +1341,58 @@ def build_smart_city_prompt(coverage: Dict[str, float], base_prompt: str) -> str
     return prompt
 
 
+# Prompts aligned with SD 1.5 training (LAION: natural captions, comma-separated keywords).
+# Order: subject/angle, content details, style/medium, quality (front-weighted in CLIP).
 DEFAULT_PROMPT = (
-    "high-resolution satellite aerial image, orthographic view, "
-    "realistic rooftops, agricultural parcels, forest canopy texture, "
-    "clear road networks, geographic consistency, "
-    "futuristic planned city, organized layout, wide tree-lined boulevards, "
-    "modern glass and steel buildings, green roofs, solar panels on buildings, "
-    "hyper-realistic, bright daylight, utopian atmosphere, "
-    "clear sky, no clouds, photorealistic, sharp focus"
+    # "aerial view, satellite photograph, top-down, city, "
+    # "planned city, grid layout, modern buildings, white concrete, glass roofs, "
+    # "green parks, boulevards, solar panels, rooftops, "
+    # "photorealistic, professional photography, daylight, clear sky, "
+    # "high quality, detailed, sharp focus, 8k"
+
+    # "aerial view, satellite imagery, top-down view, overhead shot, orthographic view,"
+    # "modern planned city, dense urban layout, grid street pattern, mid-rise residential blocks,"
+    # "white concrete buildings, flat rooftops, glass structures, rooftop solar panels,"
+    # "urban greenery, parks, trees, boulevards, clean infrastructure,"
+    # "photorealistic, ultra realistic, hyperdetailed, highly detailed,"
+    # "sharp focus, global illumination, natural lighting, daytime, clear sky,"
+    # "8k resolution, HDR, professional photography, cinematic realism,"
+    # "real world scale, realistic textures, no stylization, documentary style, planned redevelopment, urban renewal, zoning compliance,"
+    # "organized blocks, straight arterial roads, mixed-use zoning,"
+    # "modern residential clusters, infrastructure corridors"
+
+    "aerial view, satellite imagery, top-down view, overhead shot, orthographic projection,"
+    "modern planned city, organized urban blocks, grid street layout, zoning compliant development,"
+    "mid-rise apartment buildings, residential complexes, commercial buildings,"
+    "reinforced concrete structures, flat rooftops, rooftop terraces, glass facades,"
+    "clean building edges, sharp corners, correct perspective, real-world scale architecture,"
+    "urban infrastructure, boulevards, sidewalks, intersections, parking lots,"
+    "green parks, trees, urban landscaping, rooftop solar panels,"
+    "architectural photography, photorealistic, ultra realistic, highly detailed,"
+    "sharp focus, global illumination, physically based rendering, natural daylight,"
+    "HDR, 8k resolution, professional photography, documentary realism,"
+    "no stylization, real materials, real textures, clean geometry"
 )
 
+# Universal SD negatives (blurry, low quality, etc.) + domain terms (slum, brown, etc.).
 DEFAULT_NEGATIVE_PROMPT = (
-    "abstract, painting, brush strokes, distorted, melted, surreal, texture hallucination, "
-    "clouds, cloud cover, cloudy, overcast, fog, haze, mist, atmospheric effects, "
-    "cloud shadows, cumulus, stratus, cirrus, weather, "
-    "grainy, noisy, blurry, artifacts, low resolution, "
-    "watercolor, painted, soft edges, smudged, amorphous shapes, "
-    "new roads, altered roads, modified river paths, "
-    "industrial buildings, factories, heavy infrastructure, "
-    "fantasy style, artistic style, painting, illustration, "
-    "distorted geometry, unrealistic colors, blurry, "
-    "low quality, watermark, text, cartoon, "
-    "informal settlement, unplanned sprawl, cramped housing, no spacing, dense slum, "
-    "overgrown vacant lot, barren land"
+    # "blurry, low quality, worst quality, jpeg artifacts, grainy, ugly, "
+    # "text, watermark, signature, "
+    # "bad anatomy, distorted, deformed, disfigured, "
+    # "painting, illustration, cartoon, abstract, "
+    # "brown, mud, slum, shantytown, ruins, fog, haze, cloudy, overcast, "
+    # "indistinct, out of focus, soft focus, lowres"
+    "blurry, lowres, worst quality, low quality, jpeg artifacts, compression artifacts,"
+    "grainy, noisy, pixelated, oversharpened,"  
+    "cartoon, anime, illustration, painting, concept art, sketch, watercolor, abstract,"
+    "cgi, 3d render, unreal engine, game engine, fantasy,"
+    "bad anatomy, malformed buildings, distorted geometry, warped perspective,"
+    "tiling, duplicate structures, floating objects, broken symmetry,"
+    "text, watermark, logo, signature, caption, label,"
+    "fog, haze, mist, smoke, overcast, cloudy, dusk, night,"
+    "mud, dirt, ruins, slums, shantytown, garbage, decay,"
+    "soft focus, depth of field blur, motion blur, out of frame, informal settlement, slums, shanty housing, chaotic layout,"
+    "organic sprawl, unplanned development"
 )
 
 
