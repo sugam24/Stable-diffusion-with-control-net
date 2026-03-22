@@ -58,7 +58,7 @@ def estimate_cost(
 
     Returns:
         Dict with keys: total_cost_usd, total_area_m2, area_km2, breakdown (per-class cost and area),
-        unit_costs_used, currency, note.
+        unit_costs_used, currency. (Citations: see COST_ESTIMATION_SOURCES.md in the repo.)
     """
     unit_costs = unit_costs or DEFAULT_UNIT_COSTS_USD_PER_M2
     total_area_m2 = total_area_km2 * 1e6
@@ -87,8 +87,6 @@ def estimate_cost(
         "breakdown": breakdown,
         "unit_costs_used": dict(unit_costs),
         "currency": "USD",
-        "note": "Parametric estimate from land-use coverage and published unit cost ranges (infrastructure/construction datasets).",
-        "unit_cost_sources": "See COST_ESTIMATION_SOURCES.md for citations: RSMeans, State DOT (AR/NH), World Bank ROCKS, CA unit prices, World Bank urban expansion.",
     }
 
 
@@ -193,10 +191,6 @@ def run_estimation(
             pred = predict_with_model(model, coverage, total_area_km2)
             if pred is not None:
                 result["model_prediction_usd"] = round(pred, 2)
-                result["note"] = (
-                    result.get("note", "")
-                    + " Optional regression model trained on synthetic cost data (same parametric formula)."
-                )
 
     if output_path:
         os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
