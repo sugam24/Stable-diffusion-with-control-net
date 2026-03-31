@@ -42,8 +42,9 @@ from diffusers import (
     EulerAncestralDiscreteScheduler,
 )
 
-# Import compute_coverage from the same directory
+# Import compute_coverage and cost estimation from the same directory
 from compute_coverage import compute_coverage
+from estimate_build_cost import run_estimation as run_build_cost_estimation
 
 
 # =============================================================================
@@ -587,6 +588,7 @@ def create_report(
     
     Args:
         image_path: Path to original satellite image
+
         mask_path: Path to segmentation mask
         analysis: Urban analysis dictionary
         suggestions: Planning suggestions dictionary
@@ -1102,10 +1104,10 @@ class SmartCitySatelliteGenerator:
         prompt: str,
         negative_prompt: str = "",
         num_inference_steps: int = 35,
-        guidance_scale: float = 7.0,
+        guidance_scale: float = 6.0,
         controlnet_conditioning_scale: Union[float, List[float], None] = None,
         control_guidance_start: float = 0.0,
-        control_guidance_end: float = 0.7,
+        control_guidance_end: float = 0.65,
         ip_adapter_scale: float = 0.6,
         strength: float = 0.60,
         seed: Optional[int] = None,
@@ -1313,12 +1315,16 @@ def validate_and_log_results(
 # Per-class descriptors: comma-separated keywords (SD/LAION training style).
 CLASS_PROMPTS = {
     "Residential Area": (
-        "grid blocks, white buildings, glass roofs, windows, solar panels, "
-        "green rooftops, tree-lined streets, modern architecture"
+        "dense residential neighborhood, many houses and apartment blocks, "
+        "continuous building rooftops, rectangular roof footprints, top-down nadir view, "
+        "smooth roof surfaces, varied natural roof colors gray white beige terracotta, "
+        "subdivision with homes, row houses, mid-rise flats, condominium blocks, "
+        "visible walls and windows from above, soft building shadows, "
+        "urban built-up fabric, not empty land, not bare soil, not vacant lot"
     ),
     "Unused Land": (
-        "green parks, playgrounds, sports fields, walking paths, "
-        "community garden, lawn, trees"
+        "natural green parks, grass, sports fields, walking paths, "
+        "community garden, trees, realistic vegetation"
     ),
     "Agricultural Area": (
         "crop fields, greenhouses, farm layout, irrigation, agriculture"
@@ -1361,17 +1367,17 @@ DEFAULT_PROMPT = (
     # "organized blocks, straight arterial roads, mixed-use zoning,"
     # "modern residential clusters, infrastructure corridors"
 
-    "aerial view, satellite imagery, top-down view, overhead shot, orthographic projection,"
+    "aerial view, satellite photograph, true color orthophoto, natural satellite color balance,"
+    "low noise image, smooth tonal gradation, clean readable rooftops from above, "
+    "not oversaturated, subdued realistic colors, natural roof color variation,"
+    "top-down nadir view, overhead orthographic projection,"
     "modern planned city, organized urban blocks, grid street layout, zoning compliant development,"
     "mid-rise apartment buildings, residential complexes, commercial buildings,"
     "reinforced concrete structures, flat rooftops, rooftop terraces, glass facades,"
-    "clean building edges, sharp corners, correct perspective, real-world scale architecture,"
+    "clear building footprints, correct perspective, real-world scale architecture,"
     "urban infrastructure, boulevards, sidewalks, intersections, parking lots,"
     "green parks, trees, urban landscaping, rooftop solar panels,"
-    "architectural photography, photorealistic, ultra realistic, highly detailed,"
-    "sharp focus, global illumination, physically based rendering, natural daylight,"
-    "HDR, 8k resolution, professional photography, documentary realism,"
-    "no stylization, real materials, real textures, clean geometry"
+    "photorealistic, natural daylight, clear sky, professional aerial survey, documentary style"
 )
 
 # Universal SD negatives (blurry, low quality, etc.) + domain terms (slum, brown, etc.).
@@ -1383,7 +1389,10 @@ DEFAULT_NEGATIVE_PROMPT = (
     # "brown, mud, slum, shantytown, ruins, fog, haze, cloudy, overcast, "
     # "indistinct, out of focus, soft focus, lowres"
     "blurry, lowres, worst quality, low quality, jpeg artifacts, compression artifacts,"
-    "grainy, noisy, pixelated, oversharpened,"  
+    "grainy, noisy, pixelated, oversharpened, speckled, high frequency noise, crunchy texture,"
+    "posterized, dithering, chromatic noise, cluttered texture, acid bright colors, vibrating pattern,"
+    "oversaturated, neon, rainbow colors, candy colors, garish, lurid, vivid unnatural colors,"
+    "false color, thermal style, technicolor, psychedelic, extreme color grading, hdr look,"
     "cartoon, anime, illustration, painting, concept art, sketch, watercolor, abstract,"
     "cgi, 3d render, unreal engine, game engine, fantasy,"
     "bad anatomy, malformed buildings, distorted geometry, warped perspective,"
@@ -1391,6 +1400,8 @@ DEFAULT_NEGATIVE_PROMPT = (
     "text, watermark, logo, signature, caption, label,"
     "fog, haze, mist, smoke, overcast, cloudy, dusk, night,"
     "mud, dirt, ruins, slums, shantytown, garbage, decay,"
+    "excavation site, quarry, bulldozed wasteland, mud flat without buildings,"
+    "texture noise without rooftops or structures,"
     "soft focus, depth of field blur, motion blur, out of frame, informal settlement, slums, shanty housing, chaotic layout,"
     "organic sprawl, unplanned development"
 )
@@ -1458,8 +1469,17 @@ def process_single_pair(
         create_report(image_path, mask_path, analysis, suggestions, report_path)
         if verbose:
             log(f"   Report saved: {report_path}")
-
-    if args.analysis_only:
+        if getattr(args, "cost_estimate", False):
+            cost_path = os.path.join(output_dir, f"{Path(output_path).stem}_cost_estimate.json")
+            run_build_cost_estimation(
+                coverage,
+                total_area_km2=getattr(args, "area_km2", 1.0),
+                use_trained_model=getattr(args, "cost_use_model", False),
+                output_path=cost_path,
+                print_result=verbose,
+            )
+            if verbose:
+                log(f"   Cost estimate saved: {cost_path}")
         return True
 
     # PART 3: Generation
@@ -1521,7 +1541,7 @@ def process_single_pair(
         ctrl_for_depth = original_image
 
     control_images = [canny_image]
-    control_scales = [getattr(args, "controlnet_scale", 0.7)]
+    control_scales = [getattr(args, "controlnet_scale", 0.62)]
 
     if getattr(args, "no_seg_control", False):
         if verbose:
@@ -1529,7 +1549,7 @@ def process_single_pair(
     else:
         seg_image = create_seg_control_image(label_mask)
         control_images.append(seg_image)
-        control_scales.append(getattr(args, "seg_scale", 0.75))
+        control_scales.append(getattr(args, "seg_scale", 0.82))
 
     if getattr(args, "use_depth_control", False):
         depth_image = extract_depth_image(ctrl_for_depth, resolution=args.size)
@@ -1561,18 +1581,18 @@ def process_single_pair(
         guidance_scale=args.guidance_scale,
         controlnet_conditioning_scale=controlnet_scale,
         control_guidance_start=getattr(args, "control_guidance_start", 0.0),
-        control_guidance_end=getattr(args, "control_guidance_end", 0.7),
+        control_guidance_end=getattr(args, "control_guidance_end", 0.65),
         ip_adapter_scale=args.ip_adapter_scale,
         strength=args.strength,
         seed=args.seed,
     )
 
-    if args.denoise:
+    if not getattr(args, "no_denoise", False):
         generated_image = denoise_generated_regions(
             generated_image, inpaint_mask, strength=args.denoise_strength
         )
         if verbose:
-            log("   Applied light denoising to generated regions")
+            log("   Applied light denoising to generated regions (use --no_denoise to skip)")
 
     if getattr(args, "sharpen", False):
         generated_image = sharpen_generated_regions(
@@ -1599,6 +1619,19 @@ def process_single_pair(
     if verbose:
         log("\nCompositing with original (preserving immutable regions)...")
         log(f"   Output saved: {output_save_path}")
+
+    # Optional: estimate cost to build the new city from coverage and area
+    if getattr(args, "cost_estimate", False):
+        cost_path = os.path.join(output_dir, f"{stem}_cost_estimate.json")
+        run_build_cost_estimation(
+            coverage,
+            total_area_km2=getattr(args, "area_km2", 1.0),
+            use_trained_model=getattr(args, "cost_use_model", False),
+            output_path=cost_path,
+            print_result=verbose,
+        )
+        if verbose:
+            log(f"   Cost estimate saved: {cost_path}")
 
     return True
 
@@ -1642,26 +1675,26 @@ def main():
     parser.add_argument(
         "--steps",
         type=int,
-        default=35,
-        help="Number of inference steps"
+        default=40,
+        help="Number of inference steps (more steps = smoother, less noisy; try 40-45)"
     )
     parser.add_argument(
         "--guidance_scale",
         type=float,
-        default=7.0,
-        help="CFG scale (5-8 for stability; >10 causes crunchy/over-saturated)"
+        default=6.0,
+        help="CFG scale (5.5-6.5 for calm colors and less noise; higher = crunchier/saturated)"
     )
     parser.add_argument(
         "--controlnet_scale",
         type=float,
-        default=0.7,
-        help="Canny ControlNet scale (0.6-0.8 reduces over-guidance from chaotic input)"
+        default=0.62,
+        help="Canny ControlNet scale (lower = less edge fighting and speckle; try 0.55-0.7)"
     )
     parser.add_argument(
         "--strength",
         type=float,
-        default=0.60,
-        help="Inpainting strength (0.5-0.8). Lower preserves more input style; 1.0 fully regenerates"
+        default=0.55,
+        help="Inpainting strength (0.45-0.65 for natural colors). Lower preserves input tones; higher = more vivid change"
     )
     parser.add_argument(
         "--seed",
@@ -1681,6 +1714,22 @@ def main():
         help="Only run analysis and generate report, skip image generation"
     )
     parser.add_argument(
+        "--cost_estimate",
+        action="store_true",
+        help="Estimate cost to build the new city from land-use coverage; saves <prefix>_cost_estimate.json and prints total (USD)"
+    )
+    parser.add_argument(
+        "--area_km2",
+        type=float,
+        default=1.0,
+        help="Total site area in km² for cost estimation (default 1.0). Used only with --cost_estimate"
+    )
+    parser.add_argument(
+        "--cost_use_model",
+        action="store_true",
+        help="Also run regression model trained on synthetic cost data (requires scikit-learn)"
+    )
+    parser.add_argument(
         "--ip_adapter_scale",
         type=float,
         default=0.6,
@@ -1697,15 +1746,20 @@ def main():
         help="Use CPU offload for low VRAM GPUs (e.g. 4GB). Slower but works on small GPUs."
     )
     parser.add_argument(
+        "--no_denoise",
+        action="store_true",
+        help="Skip light bilateral smoothing on inpainted regions (smoothing is ON by default to reduce speckle)"
+    )
+    parser.add_argument(
         "--denoise",
         action="store_true",
-        help="Apply light bilateral denoising to generated regions to reduce noise"
+        help="Optional no-op: post-smooth is already default; kept for old scripts"
     )
     parser.add_argument(
         "--denoise_strength",
         type=float,
-        default=0.3,
-        help="Denoise blend strength (0-1). Higher = more smoothing. Default 0.3"
+        default=0.28,
+        help="Post-smooth blend strength on generated regions (0-1). Default 0.28"
     )
     parser.add_argument(
         "--no_seg_control",
@@ -1715,8 +1769,8 @@ def main():
     parser.add_argument(
         "--seg_scale",
         type=float,
-        default=0.75,
-        help="Segmentation ControlNet weight (0.6-0.8 lets model clean up chaotic layout)"
+        default=0.82,
+        help="Segmentation ControlNet weight (very high can increase texture fighting; try 0.78-0.88)"
     )
     parser.add_argument(
         "--use_depth_control",
@@ -1808,8 +1862,8 @@ def main():
     parser.add_argument(
         "--control_guidance_end",
         type=float,
-        default=0.7,
-        help="ControlNet end (0-1). Stop control at 70%% so model can sharpen in final 30%%. Default 0.7"
+        default=0.65,
+        help="ControlNet end (0-1). Lower = longer final phase without control (smoother, less speckle). Default 0.65"
     )
     parser.add_argument(
         "--upscale",
